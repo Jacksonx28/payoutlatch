@@ -1,94 +1,133 @@
 # PayoutLatch
 
-Approve the job. Pay it once.
+**Human-approved payouts. Agent execution with an onchain limit.**
 
-PayoutLatch is an early NEAR prototype for crypto-paying agencies and DAOs delegating contractor payouts to agents. An owner funds a job with an immutable recipient and amount. Authorized executors can request that payment, but cannot redirect it or execute it again while pending or after success.
+An agency owner approves a contributor, an exact NEAR amount and an optional agent account. That executor can release the payment, but cannot change its destination, increase its amount or pay the same job twice. A transfer locks the job before it leaves the contract; only its callback can settle or reopen it.
 
-## Current status — 13 November 2026
+## Working release
 
-- Rust NEAR contract implemented and compiled to WebAssembly; 10 unit tests pass.
-- Local NEAR sandbox integration passes: concurrent execution pays exactly once (verified recipient balance), paid replay rejects, unauthorized callback rejects, failed transfer reopens the job, and owner cancellation returns its principal.
-- Browser workflow implemented and manually exercised; 5 JavaScript model tests pass.
-- Browser payments are **simulated**, reset on reload, and do not connect to a wallet or deployed contract.
-- No live testnet deployment, AI invoice extraction, real shared receipts, or hackathon submission yet.
-- This is a development prototype, not audited financial software.
+- **NEAR testnet contract:** [`payoutlatch-dev-f3d79e2d.testnet`](https://testnet.nearblocks.io/address/payoutlatch-dev-f3d79e2d.testnet), version `2.0.0-testnet`.
+- **Website:** [PayoutLatch](https://payoutlatch.israeljackson854.chatgpt.site). Hosted access may require the owner's permission; the complete local demo below works independently of Sites.
+- **Live receipts:** [verification report](docs/TESTNET_PROOF.md), also in the app's **Onchain proof** view. No wallet is needed to inspect them.
+- Wallet connection, funded approval, release, owner refund, executor revocation, owner-specific lists, search and public job links are implemented.
+- A real testnet run demonstrated one successful transfer from two concurrent executions, exact recipient balance increase, rejected replay, failed-delivery recovery, owner-only cancellation and executor revocation.
+- 14 Rust unit tests, a real local NEAR sandbox integration and 5 JavaScript model/precision tests pass. The JS demo model is retained as a test fixture; it is **not** used for live payment state.
 
-## Try the interface
+This is a testnet prototype, not audited production financial software. There is no AI model making approval decisions. The included executor can be called by an agent, scheduler or human.
 
-Requires Node.js 20 or newer. No runtime packages required.
+## Run locally
+
+Use Node.js 20.19+ (22 LTS recommended), npm and a browser. The checked-in static build can run immediately; a clean dependency installation rebuilds the wallet bundle.
 
 ```sh
+git clone https://github.com/Jacksonx28/payoutlatch.git
+cd payoutlatch
+npm ci
+npm run build
 npm start
-# Open http://127.0.0.1:4174
-npm test
+# http://127.0.0.1:4174
 ```
 
-1. Open **Workspace**, select **Approve a payout**, enter a unique ID, job title, named `.testnet` recipient and positive amount. The job appears as Ready to pay.
-2. Select **Pay**. Observe Pending followed by Paid, then open its sample receipt.
-3. Open **Field guide** and select **Try two requests**. The activity feed shows Agent B blocked and one simulated successful payment.
-4. Revoke agent access, then attempt another payout. It is rejected. Existing in-flight requests are unaffected by revocation.
-5. Cancel an approved job to simulate refunding its principal to its owner.
+1. Open **Onchain proof → Verify live state**. Open the paid receipt and its explorer transaction. This is a read-only demo with real chain data.
+2. Select **Connect wallet**. Use [Meteor Wallet testnet](https://wallet.meteorwallet.app), create/fund a separate test account if needed, and approve the connection. The popup must be allowed.
+3. Select **New payout**. Use an existing recipient, a unique reference, an amount such as `0.001` and optionally an executor account. The app verifies recipient existence before approval. Test accounts only; no real funds.
+4. Review the wallet transaction. Deposit = principal + **0.02 NEAR** retained storage; gas is extra. The contract checks the exact deposit.
+5. Open the job and **Release payout**, or send its copied job link to the assigned executor. Inspect the callback-confirmed state and explorer transaction.
+6. For a second Approved job, **Cancel & refund** returns its principal to its owner. **Revoke executor** removes its delegation while keeping owner execution available.
 
-## Contract
+Meteor Wallet creates a limited function-call access key for `execute`, `cancel` and `set_executor`. Zero-deposit actions may use that key after an in-app confirmation; the payable approval requires wallet authorization. Disconnect removes the local wallet connection. Never paste a seed phrase into PayoutLatch. The application contains no development-account private keys.
 
-One contract serves one owner. `new` must be called by that owner; deploy and initialize together in a live deployment. `set_executor` permits up to 20 executor accounts. For production, executors should have narrowly scoped keys and the contract account's upgrade keys need an explicit custody policy.
+## Agent execution
 
-`approve_job(job_id, recipient, amount)` is owner-only. Attach exactly the principal plus **0.02 NEAR** retained storage reserve. Amounts are decimal strings in yoctoNEAR, not floating point numbers. Job IDs are permanent and limited to 96 bytes. No document contents are stored.
+The executable adapter accepts only an existing job ID. It cannot approve a job, set a new amount or redirect funds. Terminal jobs are a no-op; pending jobs require a later read, not another approval.
 
-`execute(job_id)` accepts only the job identifier. The stored recipient and amount determine the transfer. Attach at least 40 Tgas; 100 Tgas is recommended in tooling.
+```sh
+node scripts/agent.mjs /absolute/path/to/executor-testnet.json owner.testnet:reference
+```
 
-State transitions:
+The key file is local, outside the public repository:
+
+```json
+{"network_id":"testnet","account_id":"your-agent.testnet","private_key":"YOUR_LOCAL_TESTNET_KEY"}
+```
+
+Use a dedicated testnet executor account, preferably with an access key scoped to this contract's `execute` method. The owner sets that account in the approval. To integrate any agent framework, invoke the command on its approved job ID and inspect the returned chain status. A failed/unknown network response must trigger a state read before retry. The contract independently enforces authorization and duplicate protection.
+
+## Contract API
+
+Each job has its own owner. References are namespaced as `owner_account:reference`; another wallet cannot reserve your references. Records and terminal IDs are permanent.
+
+| Method | Parameters | Authority / deposit |
+|---|---|---|
+| `new` | none | Deploy and initialize atomically on a fresh account |
+| `approve_job` | `reference`, `title`, `recipient`, `amount`, `executor` (account or null) | Any wallet becomes that job's owner; exactly principal + 0.02 NEAR |
+| `execute` | `job_id` | Job owner or its current executor; no deposit |
+| `cancel` | `job_id` | Job owner; refunds principal to that owner |
+| `set_executor` | `job_id`, `executor` (account or null) | Job owner, Approved only |
+| `get_job` | `job_id` | Public view, null if absent |
+| `get_jobs` | `owner`, optional `from_index`, optional `limit` | Public view, maximum 50 per page |
+| `get_job_count` | `owner` | Public view |
+| `storage_reserve`, `version` | none | Public views |
+
+`amount` is an integer decimal string in yoctoNEAR (10^24 per NEAR), never a floating point value. References: 1–64 ASCII letters, digits, `_` or `-`. Titles: nonblank, at most 120 UTF-8 bytes. The browser displays human NEAR decimals using BigInt conversion. Use 100 Tgas for execution/refund; the contract rejects less than 40 Tgas.
 
 ```text
-Approved -> Pending -> Paid
-                    -> Approved (confirmed transfer failure)
-Approved -> RefundPending -> Cancelled
-                          -> Approved (confirmed refund failure)
+Approved → Pending       → Paid
+                         → Approved (confirmed transfer failure)
+Approved → RefundPending → Cancelled
+                         → Approved (confirmed refund failure)
 ```
 
-Both Pending states reject new transfers. The private callback checks the attempt number and expected state. A timeout in a client is never proof of failure and must not reopen a job. A lost/failed callback conservatively leaves the job pending; there is no unsafe administrative unlock. The 0.02 NEAR storage reserve is not refunded on cancellation because identifiers and terminal states remain stored.
+The private callback verifies attempt number and expected state. A timeout is not a confirmed failure. There is no administrative force-unlock; callback failure may leave a job pending. Cancellation retains the storage reserve because the terminal record remains.
 
-Build with the pinned Rust 1.86.0 toolchain and NEAR's optimizer. Raw `cargo build` output is not the deployment artifact:
+## Contract build and verification
+
+Rust 1.86.0 is pinned in `rust-toolchain.toml`; install it with rustup and add `wasm32-unknown-unknown`. The scripts use isolated `.tooling/` installations if present. NEAR's optimizer produces `artifacts/payoutlatch.wasm`; do not deploy an unoptimized cargo artifact.
 
 ```sh
-npm ci
+npm test
 npm run test:contract
 npm run build:contract
 npm run test:sandbox
 ```
 
-The current workspace has isolated Rust tooling under `.tooling/` (ignored). The scripts use it automatically when present; otherwise install Rust through rustup. The compatible, optimized deployment artifact is `artifacts/payoutlatch.wasm`.
+The sandbox checks concurrent/replay protection, exact recipient balance, cross-owner isolation, namespaced IDs, private callbacks, failed transfer/refund and revocation. It starts a local NEAR node and requires network/download access the first time.
 
-## Boundaries
+To deploy **your own disposable testnet instance**, rather than changing the public demo:
 
-The guarantee is at most one successful transfer **per approved job ID**, for this contract's execution path. Creating another ID authorizes another payment. Payments made outside this contract are not deduplicated. The owner decides whether work is delivered; no AI or chain verifies delivery. Contract administrators with full-access deployment keys can change the code. Public NEAR state exposes recipients, amounts and job identifiers; do not place confidential invoice text in IDs.
+```sh
+node scripts/create-testnet.mjs
+node scripts/deploy-testnet.mjs
+npm run test:live
+```
 
-Before submission: connect a wallet, deploy and exercise actual testnet payments, produce real transaction receipts, add the constrained invoice-to-job matching workflow, verify fresh-install steps, collect user feedback, and publish the required public repository and X demo. Do not present the simulated UI as live integration.
+Creation uses the public testnet account helper (subject to availability). Credentials go only to ignored `credentials/` with restrictive permissions. Deployment initializes atomically, verifies the uploaded WASM against its SHA-256, and writes public `dist/config.json`. The live proof script creates disposable subaccounts and spends test tokens. It updates `dist/evidence.json` and the proof report. Review those public changes before publishing your fork.
 
-## Hackathon provenance and dependencies
+Deployed WASM SHA-256: `6599b312a6d84698ffcd1a328f0475e951a9baa5ac73c7ecc58589b75fc3804b`.
 
-Original project source created during the hackathon window on 13 November 2026 (Africa/Lagos), with AI coding assistance. No pre-existing product code copied. Dependencies: NEAR SDK 5.17.2 (Rust), NEAR Workspaces 5.0.0 (sandbox development only), cargo-near 0.23.0 (build only), and their lockfile-pinned transitive dependencies. The static interface uses browser-native APIs and a vendored GSAP 3.15.1 animation runtime. Google Fonts supplies IBM Plex Sans, IBM Plex Mono and Instrument Serif, with system fallbacks. The mark and payment-document illustration are original CSS. The npm development toolchain has audit advisories; it is not shipped to the browser and should not be used with production credentials. The last production dependency audit reported zero vulnerabilities.
+## Browser verification
 
-Official resources: https://nearhackathon.com/HACKATHON.md and https://docs.near.org/smart-contracts/anatomy/crosscontract
+Desktop (1440px), tablet (800px) and mobile (390px) layouts were reviewed. Public receipts were queried from live testnet; the approval form showed the exact 0.021 NEAR deposit for a 0.001 payment. The Meteor adapter loads without startup errors. A user-signed browser transaction remains to be verified; the recorded live transaction tests were run with disposable development keys through the NEAR SDK.
 
-Potential tracks: AI Security & Defense; Autonomous Business once the agent workflow is integrated. Testnet eligibility does not remove the need to demonstrate a working integration. No submission or prize claim has been made.
+## Trust boundaries
 
-## Interface direction and references
+- At most one successful transfer **per approved job ID**, through this contract. A new reference is a new approval; payments outside the contract are not deduplicated.
+- Human owners decide whether work is satisfactory. There is no invoice identity matching, dispute adjudication, delivery oracle or AI-quality verification.
+- The deployer retains a full-access upgrade key on the testnet account. Code can be replaced. A production release needs audit and an explicit immutable/upgrade governance policy.
+- Recipients, amounts, titles and references are public. Do not put confidential invoice content in them.
+- RPC reads depend on the configured provider. The UI labels refresh failures and uses confirmed chain state for status. Explorer transaction links are a convenience; copied public job links can always query current state.
+- Testnet only. No mainnet toggle or automatic network migration. Storage reserve and gas are not refundable.
 
-The interface uses warm paper, ink-blue typography, fine rules and a restrained blue action color. Overview, Workspace, Field guide and Network are distinct hash-routed screens; sample ledger state persists while switching screens and resets on reload. The overview uses an original dimensional payment-document illustration, while operational screens prioritize readable ledger data. Reference workflows: [ThreeUI](https://threeui.com/) for dimensional composition, [Taste](https://www.tasteskill.dev/) for typography and restraint, [21st.dev](https://21st.dev/) for control composition, and [GSAP](https://gsap.com/) for purposeful state transitions. No template source or premium assets were copied.
+## Hackathon submission
 
-GSAP 3.15.1 is vendored from the pinned npm package in `dist/vendor/gsap.min.js`, retaining its copyright/license header ([standard license](https://gsap.com/standard-license)). Google Fonts supplies IBM Plex Sans, IBM Plex Mono and Instrument Serif, with system fallbacks. Animations honor reduced-motion preferences and the app works without GSAP. Payment animations reflect the local simulation's state, not network confirmations. Search filters title, milestone ID and recipient; narrow layouts use payout cards.
+Testnet-only projects are eligible in every track under Q-010 of the [official FAQ](https://nearhackathon.com/HACKATHON.md); Q-011 permits your own NEAR contract. The website is web-hosted; the payment contract is deployed on NEAR. Prize receipt requires a separate **mainnet** account. No prize account, X post or final submission has been supplied by this repository.
 
-UI verification: five ledger tests passed; browser checks covered search, approval, payment pending/success, receipt details, duplicate-request locking and revoked payment controls. Desktop, tablet and 390px mobile layouts were visually reviewed. Live-wallet payments remain pending.
+See [submission copy and demo script](docs/SUBMISSION.md). Verify the live rules and deadlines immediately before submission. Do not describe this as audited, unconditionally secure or an autonomous AI model.
 
-## Guided demo and network choice
+## Design and provenance
 
-Start with **Try a sample payout** on Overview: review the prefilled sample job, approve, pay, then open its receipt. Progress follows that job's actual simulated state. The recovery scenario confirms a failed simulated transfer before allowing a retry under the same ID. The inbox also filters cancelled jobs. All sample data is ephemeral and no wallet or live AI is connected.
+Original project created during the hackathon window on 13 November 2026 with AI coding assistance. The interface is a compact NEAR-oriented payment workspace: black, off-white, green actions, original latch mark, public proof page and responsive controls. It uses DM Sans and Space Grotesk from Google Fonts, with system fallbacks.
 
-Use NEAR testnet for the first contract deployment. The official hackathon rules checked November 13, 2026 allow testnet-only projects in every track (Q-010); an own NEAR contract can satisfy integration requirements (Q-011). The website remains web-hosted, independently of the contract network. Prize receipt requires a separate mainnet account. No mainnet deployment is included in this release. Source: https://nearhackathon.com/HACKATHON.md
+Reference workflows: [ThreeUI](https://threeui.com/) for dimensional explanation, [Taste](https://www.tasteskill.dev/) for typography and restraint, [21st.dev](https://21st.dev/) for controls and states, [GSAP](https://gsap.com/) for short entrance motion respecting reduced motion. No premium template or assets were copied. GSAP's pinned vendored runtime retains its license header.
 
-The website's network section accurately separates the working simulation and local contract tests from pending contract deployment, wallet connection and explorer-backed receipts. Current Site access remains owner-private. Judge access or the permitted reproducible local-demo route must be addressed before submission.
-
-Validation for this release: ledger tests passed; browser walkthrough completed approval → pending → paid → receipt (3/3); the recovery walkthrough confirmed failure → same-ID retry → paid. Mobile layout checked at 390px with no page overflow. Browser reported no JavaScript errors during these checks.
-
-Editorial redesign verification: 1280px desktop, 798px tablet and 390px mobile reviewed. Navigation changes the visible screen and supports browser history. The guided payout completed 3/3 steps; search found its paid record after switching to Workspace. The duplicate-request scenario and reduced-motion fallback remain available.
+NEAR SDK 5.17.2, Wallet Selector 10.1.4, near-api-js 5.1.1, esbuild 0.28.2 and all transitive versions are locked. The npm audit reports low-severity crypto-library advisories in production dependencies and higher-severity advisories in the sandbox/build development toolchain. Pinned overrides for nanoid and decode-uri-component remove the reported high-severity browser advisories (production audit: 15 low, zero moderate/high/critical). This is not a zero-advisory production release; do not use production keys with these development scripts.

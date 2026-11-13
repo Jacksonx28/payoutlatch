@@ -15,7 +15,7 @@ catch(error) {
 }
 await chmod(path,0o600);
 const rpc=async(method,params)=>{
-  const response=await fetch('https://rpc.testnet.near.org',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:'payoutlatch-setup',method,params}),signal:AbortSignal.timeout(30000)});
+  const response=await fetch('https://rpc.testnet.fastnear.com',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:'payoutlatch-setup',method,params}),signal:AbortSignal.timeout(30000)});
   if(!response.ok)throw Error(`RPC HTTP ${response.status}`);
   return response.json();
 };

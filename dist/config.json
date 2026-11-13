@@ -1,0 +1,11 @@
+{
+  "networkId": "testnet",
+  "contractId": "payoutlatch-dev-f3d79e2d.testnet",
+  "rpcUrl": "https://rpc.testnet.fastnear.com",
+  "walletUrl": "https://wallet.meteorwallet.app",
+  "explorerUrl": "https://testnet.nearblocks.io",
+  "version": "2.0.0-testnet",
+  "storageReserve": "20000000000000000000000",
+  "wasmSha256": "6599b312a6d84698ffcd1a328f0475e951a9baa5ac73c7ecc58589b75fc3804b",
+  "deploymentTransaction": "Gyd1wha1vmxH4bjYnzDe3cjtoZc9evAUsYQdDfoaTuxv"
+}
