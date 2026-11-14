@@ -107,7 +107,27 @@ Deployed WASM SHA-256: `6599b312a6d84698ffcd1a328f0475e951a9baa5ac73c7ecc58589b7
 
 ## Browser verification
 
-Desktop (1440px), tablet (800px) and mobile (390px) layouts were reviewed. Public receipts were queried from live testnet; the approval form showed the exact 0.021 NEAR deposit for a 0.001 payment. The Meteor adapter loads without startup errors. A user-signed browser transaction remains to be verified; the recorded live transaction tests were run with disposable development keys through the NEAR SDK.
+Desktop (1440px), tablet (800px) and mobile (390px) layouts were reviewed. Public receipts were queried from live testnet; the approval form showed the exact 0.021 NEAR deposit for a 0.001 payment. The Meteor adapter loads without startup errors. **A user-signed browser transaction remains to be verified.** The recorded live transaction tests used disposable development keys through the NEAR SDK.
+
+A read-only verifier now checks an approval hash against the terms you reviewed. It uses a fixed NEAR **testnet** RPC, reads no credentials and never signs, broadcasts, releases or refunds funds.
+
+1. Open the app, select **Connect wallet**, and approve Meteor's testnet connection. Confirm the account shown in the app is yours. This requires a manual wallet action.
+2. Select **New payout**. Use a unique reference such as `browser-check-20261114-01`, a funded/existing testnet recipient (your own connected testnet account is sufficient for this approval-only check), `0.001` NEAR, and leave executor blank. Use a new reference only for a genuinely new approval, never to retry an uncertain transaction.
+3. Review the Meteor authorization: receiver `payoutlatch-dev-f3d79e2d.testnet`, method `approve_job`, your reference and recipient, principal `1000000000000000000000` yoctoNEAR, and deposit **0.021 NEAR** (`21000000000000000000000` yoctoNEAR), plus gas. Approve manually. Wallet rejection is not success.
+4. Wait for the job to show **Ready to pay** (contract status `Approved`). Open **Last known transaction** immediately and copy the approval hash before performing any other action, which would replace that link. If the wallet result is uncertain, inspect wallet activity and refresh the existing job; do not approve another reference.
+5. From the repository directory, replace the placeholders below with the exact reviewed values:
+
+```sh
+npm run verify:approval -- TX_HASH YOUR_ACCOUNT.testnet browser-check-20261114-01 RECIPIENT.testnet 0.001
+# If an executor was assigned, append its account ID as the sixth argument.
+```
+
+Expected: `result: PASS`, `approvalVerified: true`, your signer and job ID, the exact signed terms/deposit, a final block height/hash, and `status: Approved` with `readyForRelease: true`. The verifier checks FINAL transaction completion, the direct approval action, all returned receipt outcomes, the contract's approval event/return value, and immutable fields in finalized `get_job` state. Later settlement is reported as its actual status (for example `Paid`); it is never presented as a fresh approval. Executor changes are reported separately because the owner can revoke or replace delegation.
+
+`browserWalletActionVerified` deliberately remains `false`: blockchain data proves the signed action, not which UI produced it. Record the manual connection and wallet approval alongside the output before marking the browser flow complete. A failed/unavailable RPC exits nonzero and leaves verification unconfirmed; rerun only this read-only command.
+
+Validation on 14 November 2026: the verifier passed against recorded SDK approval `7D4SFeQeXCvHXP1ghAu3s7LxFsaBdxnuEfEXRahy11P2`, matching its 0.001 NEAR principal and 0.021 NEAR deposit. Final state at block `277694977` was `Paid`, correctly reported as not ready for release. This is verifier calibration, **not browser-signing evidence**. Automated tests cover unrelated hashes/signers/contracts, term and deposit mismatches, failed/incomplete receipts, missing events, altered state, and mainnet configuration rejection.
+
 
 ## Trust boundaries
 

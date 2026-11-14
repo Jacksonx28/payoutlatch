@@ -10,7 +10,8 @@
     "build:contract": "sh scripts/contract.sh build",
     "test:sandbox": "node scripts/sandbox.mjs",
     "build": "esbuild src/wallet.mjs --bundle --format=esm --platform=browser --inject:src/polyfill.mjs --define:global=globalThis --minify --outfile=dist/wallet.js --define:process.env.NODE_ENV='\"production\"'",
-    "test:live": "node scripts/prove-testnet.mjs"
+    "test:live": "node scripts/prove-testnet.mjs",
+    "verify:approval": "node scripts/verify-approval.mjs"
   },
   "devDependencies": {
     "cargo-near": "0.23.0",
